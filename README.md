@@ -131,8 +131,8 @@ The limits: code search only covers indexed default branches, so this is a sampl
 | Benefit with `import { x } from` | yes | yes, and it also drops the file's own unused definitions |
 | Cost | none | a few bytes per module, for the export list |
 
-They also combine: patch 1's export set with patch 2's named exports gives both the automatic win
-and the finer one. Code that relied on an imported key migrates with one line in Bend, re-exporting
+The two could also be combined (patch 1's export set plus patch 2's named exports), which should
+give both the automatic win and the finer one. **That combination is not tested here.** Code that relied on an imported key migrates with one line in Bend, re-exporting
 the definition from its own file:
 
 ```
