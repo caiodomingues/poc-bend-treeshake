@@ -1,0 +1,1 @@
+{ "patched": "same", "note": "names Bend accepts but JS treats specially: dots, reserved words, default, then" }

@@ -2,12 +2,13 @@ import { gzipSync } from "node:zlib";
 import { join, resolve } from "node:path";
 
 export const ROOT = resolve(import.meta.dir, "..");
-export const LOADERS = ["orig", "patched"] as const;
+export const LOADERS = ["orig", "patched", "named"] as const;
+export type AnyLoader = (typeof LOADERS)[number];
 export type Loader = (typeof LOADERS)[number];
 
-export const loaderMain = (v: Loader) => join(ROOT, ".vendor", v, "bend2", "main.ts");
+export const loaderMain = (v: AnyLoader) => join(ROOT, ".vendor", v, "bend2", "main.ts");
 
-export async function bundle(v: Loader, entry: string, outdir: string, minify = true) {
+export async function bundle(v: AnyLoader, entry: string, outdir: string, minify = true) {
   const plugin = (await import(loaderMain(v))).default;
   const r = await Bun.build({ entrypoints: [entry], outdir, target: "bun", minify, plugins: [plugin] });
   if (!r.success) throw new Error(r.logs.map(String).join("\n"));

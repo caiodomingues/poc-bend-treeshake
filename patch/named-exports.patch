@@ -1,0 +1,34 @@
+diff --git a/bend2/comp.ts b/bend2/comp.ts
+index 7472084d..9e960b61 100644
+--- a/bend2/comp.ts
++++ b/bend2/comp.ts
+@@ -3094,14 +3094,25 @@ export function js_lib(book: Bend.Book, mod = false): string {
+   }
+   const effs = [...FL.effs.values()]
+     .map(([m, src]) => `(() => {\n${c_ids(src, m)}\n})();\n\n`).join("");
+-  const lib = outs === null ? "" : `export default {\n${outs.map((k) => {
++  // the default object is unchanged; each own def is also a named export,
++  // under its Bend name, so a bundler drops whatever the importer leaves out
++  const call = (k: Name): string => {
+     const { live, lays } = fun_of(k);
+     const ps = live.map((_, i) => "a" + i);
+     const xs = live.map(([, , A], i) => host(A, ps[i], false));
+-    return `  ${js_key(k)}run_lib((${ps}) => ${host(tele_unbind(
++    return `/* @__PURE__ */ run_lib((${ps}) => ${host(tele_unbind(
+       tld_of(k).T).ret, `run_loop(${name_id("$", k)}(${xs}))`, true)
+-    }, ${lays.length}),`;
+-  }).join("\n")}\n};\n`;
++    }, ${lays.length})`;
++  };
++  // `default` would clash with the default export; `then` would make the
++  // namespace a thenable, which `await import()` never resolves
++  const own = (outs ?? []).filter((k) => !k.includes(":"));
++  const named = own.filter((k) => k !== "default" && k !== "then");
++  const lib = outs === null ? "" : own.map((k, i) =>
++    `const EXP_${i} = ${call(k)};\n`).join("") + `export default {\n${outs
++    .map((k) => `  ${js_key(k)}${own.includes(k) ? "EXP_" + own.indexOf(k)
++      : call(k)},`).join("\n")}\n};\nexport { ${named.map((k) =>
++      `EXP_${own.indexOf(k)} as ${JSON.stringify(k)}`).join(", ")} };\n`;
+   const jumps = graph_close(new Set([CLO_APPLY]), [...FL.tails]
+     .flatMap(([k, ts]) => [...ts].map((t) => [t, k])));
+   const funs = [...FL.units.values()].flatMap((u) =>

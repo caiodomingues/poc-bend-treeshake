@@ -1,4 +1,5 @@
 .vendor/
 .out/
-.out-corpus.log
+.tmp/
+.out-*.log
 node_modules/

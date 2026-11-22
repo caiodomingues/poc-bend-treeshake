@@ -1,1 +1,1 @@
-{ "same": false, "why": "the one behavior the patch removes: JS reading an imported def through the default object (key \"lib:used\")" }
+{ "patched": "differs", "why": "the one behavior patch 1 removes: JS reading an imported def through the default object (key \"lib:used\"); patch 2 keeps it" }
