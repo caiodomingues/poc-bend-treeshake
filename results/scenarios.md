@@ -11,3 +11,5 @@
 | 07-compat-imported-key | 1.0 KB / 0.4 KB | 0.5 KB / 0.3 KB (differs) | same output, +4 B | — |
 | 08-own-unused-def | 0.8 KB / 0.3 KB | 0.8 KB / 0.3 KB (same) | same output, +8 B | 0.3 KB / 0.2 KB (same) |
 | 09-names | 1.2 KB / 0.5 KB | 1.2 KB / 0.5 KB (same) | same output, +36 B | 1.8 KB / 0.8 KB (same) |
+| 10-effect-load-time | 0.6 KB / 0.4 KB | 0.4 KB / 0.3 KB (differs) | same output, +4 B | 0.4 KB / 0.3 KB (same) |
+| 11-esmodule-name | 0.3 KB / 0.2 KB | 0.3 KB / 0.2 KB (same) | same output, +8 B | 0.4 KB / 0.3 KB (same) |

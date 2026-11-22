@@ -1,0 +1,1 @@
+{ "patched": "same", "note": "a def named __esModule: bundlers use that name to mark ES modules converted to CommonJS" }

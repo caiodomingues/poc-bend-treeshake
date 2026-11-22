@@ -1,0 +1,1 @@
+{ "patched": "differs", "why": "an imported file's JS effect runs top-level code at load. Released Bend loads it because an unused def (Unit -> IO, not seen as IO by the exporter) is exported and reaches the effect; patch 1 no longer loads it. Base effects only register handlers at load, so they are unaffected." }

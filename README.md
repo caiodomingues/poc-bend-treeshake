@@ -27,45 +27,41 @@ page. The CLI build (`bend x.bend -o x.js`) does not have this problem, because 
 
 **Patch 1, own definitions only** ([`patch/js-lib-own-defs.patch`](patch/js-lib-own-defs.patch), one line)
 
-A module exports only its own definitions. Imported definitions stay internal, and the existing
-reachability pass keeps only what those exports reach. This follows a convention Bend already
-has:
+```diff
+-    return done_live(t) && !t.b && t.x === 0 && io_base(FL.book, t.T) === null;
++    return done_live(t) && !t.b && t.x === 0 && io_base(FL.book, t.T) === null
++      && !k.includes(":");
+```
+
+A module exports only its own definitions. Imported ones stay internal, and the existing
+reachability pass keeps only what the exports reach. This follows conventions Bend already has:
 - `bend.ts` says "ns:name is internal";
 - `main.ts`'s `cli_verdict` already uses `!k.includes(":")` to mean "a def of this file";
-- the guide describes `-o f.mjs`, which takes the same code path, as "an ES module of its non-IO
+- the guide describes `-o f.mjs`, which takes this code path, as "an ES module of its non-IO
   defs".
-
-It removes one behavior: JS can no longer read an imported definition through the default
-object (`R["lib:used"]()`).
 
 **Patch 2, named exports beside the default object** ([`patch/named-exports.patch`](patch/named-exports.patch), about 20 lines)
 
 The default object stays exactly as it is today. Each of the file's own definitions is also a
-named export under its Bend name, and every value is marked `/* @__PURE__ */` so a bundler may
-drop what nobody imports.
+named export under its exact Bend name (an ES2022 string export name, so `Place.word` needs no
+mangling). Every value is marked `/* @__PURE__ */`, so a bundler may drop what nobody imports.
 - `import R from "./x.bend"` behaves as today.
 - `import { pick } from "./x.bend"` lets the bundler drop everything else, including the file's
-  own unused definitions, which patch 1 does not reach.
+  own unused definitions.
 
-Bend names that are awkward in JS:
-
-| Bend def | Named export | How JS imports it |
-|---|---|---|
-| `Place.word` (dotted) | yes, under its exact name (an ES2022 string export name) | `import { "Place.word" as word }`, or `NS["Place.word"]` |
-| `new`, `class`, `constructor`, `__proto__` (reserved words) | yes | `import { new as n }` |
-| `default` | no: it would clash with the default export | `R.default()` (default object, as today) |
-| `then` | no: it would make the module a thenable, which `await import()` never resolves (observed: the import hangs) | `R.then()` (default object, as today) |
-
-No mangling is needed: the export name is the Bend name.
+Two names cannot become named exports, and stay reachable through the default object:
+- `default` clashes with the default export (observed: the build fails);
+- `then` makes the module a thenable that `await import()` never resolves (observed: the import
+  hangs).
 
 ## Evidence
 
-All runs used Bend v2.0.40, both as released and with each patch, on Bun 1.4.5 under macOS 27.2
+All runs used Bend v2.0.40, as released and with each patch; Bun 1.4.5; Node 22.23.5; macOS 27.2
 (arm64).
 
 ### 1. Bend's own test corpus, differential ([`results/corpus.md`](results/corpus.md))
 
-Every `tests/**/*.bend` of the v2.0.40 tag was compiled in module mode by all three compilers and
+Every `tests/**/*.bend` of the tag was compiled in module mode by all three compilers and
 imported. Every exported definition of the file itself that takes no arguments was called.
 
 | | |
@@ -94,11 +90,36 @@ Each scenario is bundled with `Bun.build` (minified) and run. Sizes are raw / gz
 | 07 JS reading an imported definition through the default object | 1.0 / 0.4 KB | **output differs** | **same output**, +4 B | — |
 | 08 a file's own unused definition | 0.8 / 0.3 KB | 0.8 / 0.3 KB | same output, +8 B | **0.3 / 0.2 KB** |
 | 09 dotted names, reserved words, `default`, `then` | 1.2 / 0.5 KB | 1.2 / 0.5 KB | same output, +36 B | same output |
+| 10 an imported file's JS effect with code that runs at load | — | **output differs** | **same output** | same output |
+| 11 a definition named `__esModule` | — | same output | same output | same output |
 
-All outputs match released Bend except patch 1 on scenario 07, which is the one behavior it
-removes.
+### 3. Outside Bun's bundler ([`results/environments.md`](results/environments.md))
 
-### 3. A real project ([`results/engine.md`](results/engine.md))
+Scenarios 06, 09 and 11 were compiled to a standalone ES module (what `bend x.bend -o x.mjs`
+writes) and run in eight environments:
+- Node with no bundler;
+- Node through Bend's own loader;
+- esbuild (ESM and CommonJS);
+- Rollup (ESM and CommonJS);
+- Vite;
+- webpack.
+
+In every environment, every compiler and import style **printed what released Bend prints**. That
+includes dotted names, reserved words and `__esModule` in CommonJS output. Every bundler also drops
+the unused code, as this gzip comparison for scenario 06 shows:
+
+| Bundler | released | patch 1 | patch 2, named import |
+|---|---|---|---|
+| esbuild | 37.3 KB | 0.9 KB | 0.9 KB |
+| Rollup | 37.9 KB | 1.1 KB | 1.1 KB |
+| webpack | 37.2 KB | 1.0 KB | 1.0 KB |
+| Vite (library mode, whitespace kept) | 63.7 KB | 2.0 KB | 2.0 KB |
+
+Bend's loader under Node needs `--experimental-transform-types` even as released: `main.ts` uses
+a TypeScript parameter property, which Node's default strip-only mode rejects. This happens
+without either patch.
+
+### 4. A real project ([`results/engine.md`](results/engine.md))
 
 [opengameworld/engine](https://github.com/opengameworld/engine) at `a728de4`, a game engine in Bend
 with a 42-clip animation library (3.8 MB of generated Bend).
@@ -110,54 +131,96 @@ with a 42-clip animation library (3.8 MB of generated Bend).
 | A module using 1 of the 42 clips | 9,071 / **1,893 KB** | 167 / **33.5 KB** | 167 / **33.4 KB** (named import) |
 | The clip's value (length, hash) | 209575, 4100284925987309443 | identical | identical |
 
-### 4. Public code that imports `.bend` modules ([`results/github-usage.md`](results/github-usage.md))
+(Patch 1 was measured here with an earlier, comment-only variant; the code is the same.)
+
+### 5. Public code that imports `.bend` modules ([`results/github-usage.md`](results/github-usage.md))
 
 GitHub code search turned up 272 candidate files, of which 5 files in 3 repositories import a
 `.bend` module:
 - **4** use only `X.name` with plain names, which neither patch changes.
-- **1** was flagged, and on inspection it imports a `.bend` file as a path asset
-  (`with { type: "file" }`), not as a module.
+- **1** was flagged, and on inspection it imports a `.bend` file as a path asset, not as a module.
 - **0** depend on the default object's imported keys.
 
-The limits: code search only covers indexed default branches, so this is a sample, not a census.
+Code search covers only what GitHub has indexed, so this is a sample, not a census.
+
+### 6. Bend's size gate ([`results/size-gate.md`](results/size-gate.md))
+
+`gates/repo.ts` caps `bend2/comp.ts` at 66,000 tokens. The gate counts with `ttok -m
+gpt-3.5-turbo`, whose encoding is cl100k_base; we counted the same encoding with js-tiktoken.
+
+| `comp.ts` | Tokens | Room under the cap |
+|---|---|---|
+| released | 65,977 | 23 |
+| patch 1 | 65,984 (+7) | 16: **passes** |
+| patch 2 | 66,183 (+206) | **over by 183** |
+
+Patch 2 also stays over the cap in a compacted form (about +77 tokens). By the gate's own rule, it
+needs room made by simplifying something else in `comp.ts`. That is the Bend team's call.
+
+### 7. Tests in Bend's format ([`upstream/tests/io`](upstream/tests/io), [`results/upstream-tests.md`](results/upstream-tests.md))
+
+`bundle_own_exports` and `bundle_named_exports` follow `tests/io/bundle_inline`: a `.bend` file
+whose JS effect builds a page with the real CLI, checks it, and prints `0`. Both were run in the
+two lanes that need no C twin, interpreted and compiled to JS.
+
+| Test | released | patch 1 | patch 2 |
+|---|---|---|---|
+| `bundle_own_exports` | fails (check 2: unused code shipped) | **passes** | fails |
+| `bundle_named_exports` | fails (check 1: no named export) | fails | **passes** |
+
+Each test fails on released Bend and passes only with its own patch.
+
+## Side effects, known
+
+1. **Patch 1: JS can no longer read an imported definition through the default object**
+   (`R["lib:used"]()`, scenario 07). No public code found does this. Code that did migrates with
+   one line in Bend, re-exporting the definition from its own file:
+   `def used() -> U32: L.used()`.
+2. **Patch 1: an imported file's JS effect may stop loading when nothing uses it** (scenario 10).
+   Released Bend loads it whenever an unused exported definition reaches it. In the scenario, a
+   function returning IO is exported because the exporter does not see it as IO. If that effect
+   file runs code at load time, that code no longer runs. Bend's own effects (`bend2/effs/*.js`)
+   only register their handler at load time, so they are unaffected.
+3. **Patch 2: a namespace import lists more keys.** `Object.keys(await import("./x.bend"))` returns
+   the named exports as well as `default`.
+4. **Patch 2: the `@__PURE__` marks are a promise.** They are true today, because `run_lib` only
+   wraps a function. A future change that made it do more would have to drop them.
+5. **Patch 2: it does not fit the size gate as written** (section 6).
 
 ## Choosing between them
 
 | | Patch 1 | Patch 2 |
 |---|---|---|
-| Size of the change | 1 line | about 20 lines |
-| Behavior removed | JS reading imported definitions through the default object (none found in use) | none |
+| Size of the change | 1 line, +7 tokens (fits the gate) | about 20 lines, +206 tokens (over the gate) |
+| Behavior changed | side effects 1 and 2 above | none for existing code |
 | Benefit with `import R from` (today's style) | yes, automatic | none |
 | Benefit with `import { x } from` | yes | yes, and it also drops the file's own unused definitions |
-| Cost | none | a few bytes per module, for the export list |
 
 The two could also be combined (patch 1's export set plus patch 2's named exports), which should
-give both the automatic win and the finer one. **That combination is not tested here.** Code that relied on an imported key migrates with one line in Bend, re-exporting
-the definition from its own file:
-
-```
-def used() -> U32: L.used()
-```
+give both the automatic win and the finer one. **That combination is not tested here.**
 
 ## Not addressed
 
 **Shared code is duplicated across modules.** Each `.bend` imported from JS is compiled
 separately, with its own copy of the runtime and of shared dependencies (`run_loop2` and
-`$small_used2` in scenario 05). The engine's editor page holds 23 runtime copies. The runtime is
-small after tree shaking (about 600 B), but shared Bend code is repeated. Neither patch changes
-this, and it was not measured in full.
+`$small_used2` in scenario 05). The engine's editor page holds 23 runtime copies. Neither patch
+changes this, and it was not measured in full.
 
 ## Reproduce
 
-Needs [Bun](https://bun.sh), git, and for the last step the [gh](https://cli.github.com) CLI,
-logged in.
+Needs [Bun](https://bun.sh), [Node](https://nodejs.org) 22+, git, and for the usage scan the
+[gh](https://cli.github.com) CLI, logged in.
 
 ```sh
+bun install                   # esbuild, rollup, vite, webpack, js-tiktoken (dev only)
 ./setup.sh                    # bendlang/bend v2.0.40 three times in .vendor/: released, patch 1, patch 2
 bun harness/scenarios.ts      # results/scenarios.md
-bun harness/corpus.ts         # results/corpus.md        (PAR=8, LIMIT=n for a quick run; ~15 min)
-bun harness/engine.ts         # results/engine.md        (clones opengameworld/engine; ENGINE_REF pins it)
-bun harness/github-usage.ts   # results/github-usage.md  (rate-limited; a few minutes)
+bun harness/corpus.ts         # results/corpus.md          (PAR=8, LIMIT=n for a quick run; ~15 min)
+bun harness/environments.ts   # results/environments.md
+bun harness/engine.ts         # results/engine.md          (clones opengameworld/engine; ENGINE_REF pins it)
+bun harness/size-gate.ts      # results/size-gate.md
+bun harness/upstream-tests.ts # results/upstream-tests.md
+bun harness/github-usage.ts   # results/github-usage.md    (rate-limited; a few minutes)
 ```
 
 `BEND_SRC=/path/to/local/bend ./setup.sh` uses a local clone instead of downloading.

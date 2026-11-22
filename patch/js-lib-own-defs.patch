@@ -1,5 +1,5 @@
 diff --git a/bend2/comp.ts b/bend2/comp.ts
-index 7472084..999b249 100644
+index 7472084d..e4c2b7ee 100644
 --- a/bend2/comp.ts
 +++ b/bend2/comp.ts
 @@ -3086,7 +3086,8 @@ export function js_lib(book: Bend.Book, mod = false): string {
@@ -8,7 +8,7 @@ index 7472084..999b249 100644
      const t = tld_of(k);
 -    return done_live(t) && !t.b && t.x === 0 && io_base(FL.book, t.T) === null;
 +    return done_live(t) && !t.b && t.x === 0 && io_base(FL.book, t.T) === null
-+      && !k.includes(":");   // its own defs: an imported file's ns:name stay internal
++      && !k.includes(":");
    });
    file_book(outs ?? ["main"]);
    for (const [k, def] of done_defs(fun_runs)) {
