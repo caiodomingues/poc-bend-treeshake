@@ -20,7 +20,15 @@ Bend 2.0.40's loader (the bun plugin in `bend2/main.ts`) compiles each imported 
 
 So a module that uses one definition of a large library ships the whole library. This came up
 in a real project: one animation clip out of a 42-clip library put **1.89 MB gzip** of JS on a
-page. The CLI build (`bend x.bend -o x.js`) does not have this problem, because it roots only
+page. On an emulated phone (CPU 4x slower, 1.6 Mbit/s) that page took **10.2 s** to become ready;
+with patch 1 it took **0.52 s**.
+
+It also contradicts the guide. The guide says `bend file.bend -o f.mjs` emits "an ES module of
+**its** non-IO defs". Run on a file that imports another, that command also exports the imported
+file's definitions ([`results/cli-mjs.md`](results/cli-mjs.md)). Patch 1 makes it do what the
+guide says.
+
+The whole-program build (`bend x.bend -o x.js`) does not have this problem, because it roots only
 `main`.
 
 ## Two changes
@@ -56,8 +64,8 @@ Two names cannot become named exports, and stay reachable through the default ob
 
 ## Evidence
 
-All runs used Bend v2.0.40, as released and with each patch; Bun 1.4.5; Node 22.23.5; macOS 27.2
-(arm64).
+All runs used Bend v2.0.40, as released and with each patch; Bun 1.4.5; Node 22.23.5; Chromium
+158 (Brave, headless); macOS 27.2 (arm64).
 
 ### 1. Bend's own test corpus, differential ([`results/corpus.md`](results/corpus.md))
 
@@ -133,7 +141,35 @@ with a 42-clip animation library (3.8 MB of generated Bend).
 
 (Patch 1 was measured here with an earlier, comment-only variant; the code is the same.)
 
-### 5. Public code that imports `.bend` modules ([`results/github-usage.md`](results/github-usage.md))
+### 5. Time, not just size ([`results/perf.md`](results/perf.md), [`results/browser.md`](results/browser.md))
+
+These are the engine module that uses 1 of the 42 clips, and the editor page. Compile and import
+times are medians of 7 rounds, each a fresh process, with the compilers interleaved.
+
+| | released | patch 1 | patch 2 |
+|---|---|---|---|
+| Loader compile, 1-clip module (what `bun run dev` pays on every `.bend` change) | 3,102 ms | **764 ms** | 3,115 ms |
+| JS the dev server serves for it (unminified) | 18.9 MB | **327 KB** | 19.0 MB |
+| Bun importing that JS | 91 ms | **11 ms** | 92 ms |
+| Loader compile, editor page (really uses all 42 clips) | 3,216 ms | 3,041 ms | 3,262 ms |
+
+Patch 2 does not speed up compiling. It still compiles everything and only lets a bundler drop code
+afterwards.
+
+In a browser (Chromium 158, headless, cache off, files served gzipped; median of 5), the time from
+navigation until the module has run and computed the clip:
+
+| Build | released | patch 1 | patch 2 (named import) |
+|---|---|---|---|
+| Minified, localhost | 86 ms | 18 ms | 19 ms |
+| Minified, CPU 4x slower | 120 ms | 43 ms | 44 ms |
+| **Minified, phone: CPU 4x slower, 1.6 Mbit/s, 150 ms latency** | **10.18 s** | **0.52 s** | **0.51 s** |
+| Unminified (dev), phone conditions | 12.11 s | 0.55 s | 0.54 s |
+
+The network conditions are emulated by the browser (Chrome DevTools Protocol), not a real phone.
+Every run computed the same clip.
+
+### 6. Public code that imports `.bend` modules ([`results/github-usage.md`](results/github-usage.md))
 
 GitHub code search turned up 272 candidate files, of which 5 files in 3 repositories import a
 `.bend` module:
@@ -143,7 +179,7 @@ GitHub code search turned up 272 candidate files, of which 5 files in 3 reposito
 
 Code search covers only what GitHub has indexed, so this is a sample, not a census.
 
-### 6. Bend's size gate ([`results/size-gate.md`](results/size-gate.md))
+### 7. Bend's size gate ([`results/size-gate.md`](results/size-gate.md))
 
 `gates/repo.ts` caps `bend2/comp.ts` at 66,000 tokens. The gate counts with `ttok -m
 gpt-3.5-turbo`, whose encoding is cl100k_base; we counted the same encoding with js-tiktoken.
@@ -157,7 +193,7 @@ gpt-3.5-turbo`, whose encoding is cl100k_base; we counted the same encoding with
 Patch 2 also stays over the cap in a compacted form (about +77 tokens). By the gate's own rule, it
 needs room made by simplifying something else in `comp.ts`. That is the Bend team's call.
 
-### 7. Tests in Bend's format ([`upstream/tests/io`](upstream/tests/io), [`results/upstream-tests.md`](results/upstream-tests.md))
+### 8. Tests in Bend's format ([`upstream/tests/io`](upstream/tests/io), [`results/upstream-tests.md`](results/upstream-tests.md))
 
 `bundle_own_exports` and `bundle_named_exports` follow `tests/io/bundle_inline`: a `.bend` file
 whose JS effect builds a page with the real CLI, checks it, and prints `0`. Both were run in the
@@ -192,6 +228,8 @@ Each test fails on released Bend and passes only with its own patch.
 | | Patch 1 | Patch 2 |
 |---|---|---|
 | Size of the change | 1 line, +7 tokens (fits the gate) | about 20 lines, +206 tokens (over the gate) |
+| Faster dev compile | yes (3.1 s to 0.76 s for the 1-clip module) | no |
+| Matches the guide's `-o f.mjs` wording | yes | no (still exports imported definitions) |
 | Behavior changed | side effects 1 and 2 above | none for existing code |
 | Benefit with `import R from` (today's style) | yes, automatic | none |
 | Benefit with `import { x } from` | yes | yes, and it also drops the file's own unused definitions |
@@ -208,17 +246,21 @@ changes this, and it was not measured in full.
 
 ## Reproduce
 
-Needs [Bun](https://bun.sh), [Node](https://nodejs.org) 22+, git, and for the usage scan the
-[gh](https://cli.github.com) CLI, logged in.
+Needs [Bun](https://bun.sh), [Node](https://nodejs.org) 22+, git, a Chromium-based browser for
+the browser measurement (Chrome, Brave, ...; it runs headless with a throwaway profile), and for
+the usage scan the [gh](https://cli.github.com) CLI, logged in.
 
 ```sh
-bun install                   # esbuild, rollup, vite, webpack, js-tiktoken (dev only)
+bun install                   # esbuild, rollup, vite, webpack, js-tiktoken, puppeteer-core (dev only)
 ./setup.sh                    # bendlang/bend v2.0.40 three times in .vendor/: released, patch 1, patch 2
 bun harness/scenarios.ts      # results/scenarios.md
 bun harness/corpus.ts         # results/corpus.md          (PAR=8, LIMIT=n for a quick run; ~15 min)
 bun harness/environments.ts   # results/environments.md
 bun harness/engine.ts         # results/engine.md          (clones opengameworld/engine; ENGINE_REF pins it)
 bun harness/size-gate.ts      # results/size-gate.md
+bun harness/cli-mjs.ts        # results/cli-mjs.md         (the `-o f.mjs` command against the guide)
+bun harness/perf.ts           # results/perf.md            (after engine.ts; ROUNDS=7)
+bun harness/browser.ts        # results/browser.md         (after engine.ts; BROWSER=/path/to/chromium, ROUNDS=5)
 bun harness/upstream-tests.ts # results/upstream-tests.md
 bun harness/github-usage.ts   # results/github-usage.md    (rate-limited; a few minutes)
 ```
