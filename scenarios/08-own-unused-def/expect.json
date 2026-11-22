@@ -1,0 +1,1 @@
+{ "same": true, "note": "the patch does not shrink a file's own unused defs (one default object)" }
